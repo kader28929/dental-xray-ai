@@ -192,6 +192,8 @@ def get_logo_html() -> str:
             ext = logo_path.suffix.lstrip(".").lower()
             if ext == "jpg":
                 ext = "jpeg"
+                elif ext == "webp":
+    ext = "webp"
             b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
             return f"""
             <div class="uni-logo-corner">
