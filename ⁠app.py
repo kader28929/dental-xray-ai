@@ -1,3 +1,4 @@
+import base64
 from io import BytesIO
 from pathlib import Path
 import numpy as np
@@ -23,8 +24,9 @@ st.markdown(
             text-align: right;
         }
 
+        /* خلفية الواجهة باللون الأزرق الفاتح */
         .stApp {
-            background: linear-gradient(180deg, #f4f8fb 0%, #ffffff 100%);
+            background: linear-gradient(180deg, #dff0fb 0%, #edf7fe 55%, #f5faff 100%);
         }
 
         .main .block-container {
@@ -34,13 +36,54 @@ st.markdown(
         }
 
         .hero-card {
+            position: relative;
             background: #ffffff;
-            border: 1px solid #e2ecf3;
-            border-right: 6px solid #0ea5e9;
+            border: 1px solid #cbe3f5;
+            border-right: 6px solid #0284c7;
             border-radius: 18px;
             padding: 24px 28px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            box-shadow: 0 8px 24px rgba(2, 132, 199, 0.08);
             margin-bottom: 22px;
+        }
+
+        .hero-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .hero-content {
+            flex: 1;
+        }
+
+        /* شعار جامعة البيان الصغير في الزاوية */
+        .uni-logo-corner {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #f0f8ff;
+            border: 1px solid #bae0fb;
+            border-radius: 14px;
+            padding: 8px 12px;
+            min-width: 82px;
+            text-align: center;
+        }
+
+        .uni-logo-corner img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+            margin-bottom: 4px;
+        }
+
+        .uni-logo-text {
+            color: #0369a1;
+            font-size: 0.72rem;
+            font-weight: 800;
+            line-height: 1.2;
         }
 
         .hero-badge {
@@ -56,7 +99,7 @@ st.markdown(
 
         .hero-title {
             color: #0f172a;
-            font-size: 1.85rem;
+            font-size: 1.8rem;
             font-weight: 800;
             margin: 0 0 8px 0;
             line-height: 1.4;
@@ -71,10 +114,10 @@ st.markdown(
 
         .section-card {
             background: #ffffff;
-            border: 1px solid #e6eef5;
+            border: 1px solid #d4e8f7;
             border-radius: 16px;
             padding: 20px 22px;
-            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+            box-shadow: 0 4px 16px rgba(2, 132, 199, 0.05);
             margin-bottom: 18px;
         }
 
@@ -86,8 +129,8 @@ st.markdown(
         }
 
         .diag-box {
-            background: #f8fafc;
-            border: 1px solid #cbd5e1;
+            background: #f0f8ff;
+            border: 1px solid #bae0fb;
             border-radius: 14px;
             padding: 16px 18px;
             margin-top: 12px;
@@ -95,8 +138,8 @@ st.markdown(
 
         .metric-pill {
             display: inline-block;
-            background: #f1f5f9;
-            color: #1e293b;
+            background: #e0f2fe;
+            color: #0c4a6e;
             border-radius: 10px;
             padding: 6px 12px;
             font-size: 0.9rem;
@@ -106,8 +149,8 @@ st.markdown(
         }
 
         [data-testid="stFileUploader"] section {
-            background-color: #f8fbff !important;
-            border: 2px dashed #7dd3fc !important;
+            background-color: #f3f9fe !important;
+            border: 2px dashed #38bdf8 !important;
             border-radius: 16px !important;
             padding: 20px !important;
         }
@@ -134,6 +177,35 @@ CANDIDATE_PATHS = [
     BASE_DIR / "models" / "models" / "best_cdae_model.h5",
 ]
 
+LOGO_CANDIDATES = [
+    BASE_DIR / "logo.png",
+    BASE_DIR / "al_bayan_logo.png",
+    BASE_DIR / "logo.jpg",
+    BASE_DIR / "logo.jpeg",
+]
+
+
+def get_logo_html() -> str:
+    for logo_path in LOGO_CANDIDATES:
+        if logo_path.exists():
+            ext = logo_path.suffix.lstrip(".").lower()
+            if ext == "jpg":
+                ext = "jpeg"
+            b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
+            return f"""
+            <div class="uni-logo-corner">
+                <img src="data:image/{ext};base64,{b64}" alt="شعار جامعة البيان">
+                <span class="uni-logo-text">جامعة البيان</span>
+            </div>
+            """
+    # شارة افتراضية أنيقة في حال عدم رفع ملف logo.png بعد
+    return """
+    <div class="uni-logo-corner">
+        <span style="font-size:1.5rem; line-height:1.2;">🏛️</span>
+        <span class="uni-logo-text">جامعة البيان</span>
+    </div>
+    """
+
 
 def resolve_model_path() -> Path | None:
     for path in CANDIDATE_PATHS:
@@ -148,9 +220,6 @@ def load_cdae_model(model_path_str: str):
 
 
 def is_likely_xray_image(pil_img: Image.Image) -> tuple[bool, str]:
-    """
-    فحص أولي للتحقق أن الصورة أقرب إلى صورة أشعة سينية وليست صورة ملونة طبيعية أو غير إشعاعية.
-    """
     rgb = pil_img.convert("RGB").resize((256, 256), Image.Resampling.BILINEAR)
     arr = np.asarray(rgb, dtype=np.float32) / 255.0
 
@@ -159,22 +228,18 @@ def is_likely_xray_image(pil_img: Image.Image) -> tuple[bool, str]:
     min_c = np.minimum(np.minimum(r, g), b)
     delta = max_c - min_c
 
-    # حساب نسبة التشبع اللوني الحقيقي
     saturation = np.where(max_c > 0.05, delta / np.maximum(max_c, 1e-6), 0.0)
     high_sat_ratio = float(np.mean(saturation > 0.22))
     mean_sat = float(np.mean(saturation))
 
-    # فحص الفارق الكبير بين القنوات اللونية (الصور الطبيعية والواجهات الملونة)
     rg_diff = float(np.mean(np.abs(r - g)))
     rb_diff = float(np.mean(np.abs(r - b)))
     gb_diff = float(np.mean(np.abs(g - b)))
     color_spread = max(rg_diff, rb_diff, gb_diff)
 
-    # رفض الصور ذات التشبع اللوني الواضح أو التباين اللوني العالي
     if high_sat_ratio > 0.14 or mean_sat > 0.12 or color_spread > 0.045:
         return False, "هذه ليست صورة أشعة"
 
-    # التأكد من أن الصورة ليست مسطحة بالكامل أو ضجيجاً عشوائياً فارغاً
     gray = np.asarray(ImageOps.grayscale(rgb), dtype=np.float32) / 255.0
     if float(np.std(gray)) < 0.04:
         return False, "هذه ليست صورة أشعة"
@@ -191,9 +256,6 @@ def preprocess_image(pil_img: Image.Image, target_size: tuple[int, int] = (128, 
 
 
 def enhance_without_blur(original_gray_pil: Image.Image, pred_2d: np.ndarray, blend_weight: float = 0.35) -> Image.Image:
-    """
-    دمج مخرجات CDAE مع الصورة الأصلية بدقتها الكاملة وشحذ التفاصيل لتجنب الضبابية.
-    """
     orig_w, orig_h = original_gray_pil.size
     orig_arr = np.asarray(original_gray_pil, dtype=np.float32) / 255.0
 
@@ -203,12 +265,10 @@ def enhance_without_blur(original_gray_pil: Image.Image, pred_2d: np.ndarray, bl
     )
     pred_arr = np.asarray(pred_pil, dtype=np.float32) / 255.0
 
-    # الحفاظ على وضوح الصورة الأصلية وإضافة تحسين النموذج بنسب متوازنة
     w = float(np.clip(blend_weight, 0.0, 0.7))
     combined = np.clip((1.0 - w) * orig_arr + w * pred_arr, 0.0, 1.0)
 
     out_pil = Image.fromarray((combined * 255).astype(np.uint8), mode="L")
-    # شحذ الحواف الدقيقة لإبراز التفاصيل التشريحية
     out_pil = out_pil.filter(ImageFilter.UnsharpMask(radius=1.2, percent=125, threshold=2))
     out_pil = ImageEnhance.Contrast(out_pil).enhance(1.08)
     return out_pil
@@ -248,14 +308,21 @@ def estimate_image_quality(arr_2d: np.ndarray) -> dict:
     }
 
 
+logo_block = get_logo_html()
+
 st.markdown(
-    """
+    f"""
     <div class="hero-card">
-        <div class="hero-badge">مشروع تخرج — هندسة تقنيات الأجهزة الطبية</div>
-        <h1 class="hero-title">🦷 نظام فحص جودة صور الأشعة واستعادتها بالذكاء الاصطناعي</h1>
-        <p class="hero-subtitle">
-            منصة بحثية لتحليل صور الأشعة السينية داخل الفموية (Intraoral X-ray)، والتحقق من نوع الصورة، وتشخيص المؤشرات الأولية للخلل أو ضعف الجودة مع الحفاظ على وضوح التفاصيل.
-        </p>
+        <div class="hero-header-row">
+            <div class="hero-content">
+                <div class="hero-badge">مشروع تخرج — هندسة تقنيات الأجهزة الطبية</div>
+                <h1 class="hero-title">🦷 نظام فحص جودة صور الأشعة واستعادتها بالذكاء الاصطناعي</h1>
+                <p class="hero-subtitle">
+                    منصة بحثية لتحليل صور الأشعة السينية داخل الفموية (Intraoral X-ray)، والتحقق من نوع الصورة، وتشخيص المؤشرات الأولية للخلل أو ضعف الجودة مع الحفاظ على وضوح التفاصيل.
+                </p>
+            </div>
+            {logo_block}
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
