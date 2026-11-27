@@ -175,6 +175,7 @@ CANDIDATE_PATHS = [
     BASE_DIR / "best_cdae_model.h5",
     BASE_DIR / "models" / "best_cdae_model.h5",
     BASE_DIR / "models" / "models" / "best_cdae_model.h5",
+]
 LOGO_CANDIDATES = [
     BASE_DIR / "logo.png",
     BASE_DIR / "al_bayan_logo.png",
@@ -193,7 +194,7 @@ def get_logo_html() -> str:
             if ext == "jpg":
                 ext = "jpeg"
                 elif ext == "webp":
-    ext = "webp"
+                     ext = "webp"
             b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
             return f"""
             <div class="uni-logo-corner">
