@@ -24,7 +24,6 @@ st.markdown(
             text-align: right;
         }
 
-        /* خلفية الواجهة باللون الأزرق الفاتح */
         .stApp {
             background: linear-gradient(180deg, #dff0fb 0%, #edf7fe 55%, #f5faff 100%);
         }
@@ -57,7 +56,6 @@ st.markdown(
             flex: 1;
         }
 
-        /* شعار جامعة البيان الصغير في الزاوية */
         .uni-logo-corner {
             flex-shrink: 0;
             display: flex;
@@ -171,20 +169,21 @@ st.markdown(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+
 CANDIDATE_PATHS = [
     BASE_DIR / "best_cdae_model.h5",
     BASE_DIR / "models" / "best_cdae_model.h5",
     BASE_DIR / "models" / "models" / "best_cdae_model.h5",
 ]
+
 LOGO_CANDIDATES = [
+    BASE_DIR / "logo.png.WEBP",
     BASE_DIR / "logo.png",
     BASE_DIR / "al_bayan_logo.png",
     BASE_DIR / "logo.jpg",
     BASE_DIR / "logo.jpeg",
-    BASE_DIR / "logo.png.WEBP",
     BASE_DIR / "logo.webp",
 ]
-
 
 
 def get_logo_html() -> str:
@@ -193,22 +192,21 @@ def get_logo_html() -> str:
             ext = logo_path.suffix.lstrip(".").lower()
             if ext == "jpg":
                 ext = "jpeg"
-                elif ext == "webp":
-                     ext = "webp"
+            elif ext == "webp":
+                ext = "webp"
             b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
-            return f"""
-            <div class="uni-logo-corner">
-                <img src="data:image/{ext};base64,{b64}" alt="شعار جامعة البيان">
-                <span class="uni-logo-text">جامعة البيان</span>
-            </div>
-            """
-    # شارة افتراضية أنيقة في حال عدم رفع ملف logo.png بعد
-    return """
-    <div class="uni-logo-corner">
-        <span style="font-size:1.5rem; line-height:1.2;">🏛️</span>
-        <span class="uni-logo-text">جامعة البيان</span>
-    </div>
-    """
+            return (
+                f'<div class="uni-logo-corner">'
+                f'<img src="data:image/{ext};base64,{b64}" alt="Al-Bayan University Logo">'
+                f'<span class="uni-logo-text">جامعة البيان</span>'
+                f"</div>"
+            )
+    return (
+        '<div class="uni-logo-corner">'
+        '<span style="font-size:1.5rem; line-height:1.2;">🏛️</span>'
+        '<span class="uni-logo-text">جامعة البيان</span>'
+        "</div>"
+    )
 
 
 def resolve_model_path() -> Path | None:
