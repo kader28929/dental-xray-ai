@@ -14,7 +14,7 @@ st.title("🦷 نظام فحص جودة صور الأشعة واستعادتها
 st.write("نموذج بحثي لمشروع التخرج — قسم هندسة تقنيات الأجهزة الطبية")
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "models" / "best_cdae_model.h5"
+MODEL_PATH = BASE_DIR / "best_cdae_model.h5"
 
 
 @st.cache_resource
