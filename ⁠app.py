@@ -1,10 +1,10 @@
+from io import BytesIO
 from pathlib import Path
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 import streamlit as st
 import tensorflow as tf
 
-# إعدادات الصفحة
 st.set_page_config(
     page_title="نظام فحص جودة صور الأشعة واستعادتها",
     page_icon="🦷",
@@ -12,7 +12,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# تنسيق CSS طبي أنيق مع دعم RTL
 st.markdown(
     """
     <style>
@@ -148,12 +147,71 @@ def load_cdae_model(model_path_str: str):
     return tf.keras.models.load_model(model_path_str, compile=False)
 
 
+def is_likely_xray_image(pil_img: Image.Image) -> tuple[bool, str]:
+    """
+    فحص أولي للتحقق أن الصورة أقرب إلى صورة أشعة سينية وليست صورة ملونة طبيعية أو غير إشعاعية.
+    """
+    rgb = pil_img.convert("RGB").resize((256, 256), Image.Resampling.BILINEAR)
+    arr = np.asarray(rgb, dtype=np.float32) / 255.0
+
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    max_c = np.maximum(np.maximum(r, g), b)
+    min_c = np.minimum(np.minimum(r, g), b)
+    delta = max_c - min_c
+
+    # حساب نسبة التشبع اللوني الحقيقي
+    saturation = np.where(max_c > 0.05, delta / np.maximum(max_c, 1e-6), 0.0)
+    high_sat_ratio = float(np.mean(saturation > 0.22))
+    mean_sat = float(np.mean(saturation))
+
+    # فحص الفارق الكبير بين القنوات اللونية (الصور الطبيعية والواجهات الملونة)
+    rg_diff = float(np.mean(np.abs(r - g)))
+    rb_diff = float(np.mean(np.abs(r - b)))
+    gb_diff = float(np.mean(np.abs(g - b)))
+    color_spread = max(rg_diff, rb_diff, gb_diff)
+
+    # رفض الصور ذات التشبع اللوني الواضح أو التباين اللوني العالي
+    if high_sat_ratio > 0.14 or mean_sat > 0.12 or color_spread > 0.045:
+        return False, "هذه ليست صورة أشعة"
+
+    # التأكد من أن الصورة ليست مسطحة بالكامل أو ضجيجاً عشوائياً فارغاً
+    gray = np.asarray(ImageOps.grayscale(rgb), dtype=np.float32) / 255.0
+    if float(np.std(gray)) < 0.04:
+        return False, "هذه ليست صورة أشعة"
+
+    return True, ""
+
+
 def preprocess_image(pil_img: Image.Image, target_size: tuple[int, int] = (128, 128)):
     gray = ImageOps.grayscale(pil_img)
     resized = gray.resize(target_size, Image.Resampling.BILINEAR)
     arr = np.asarray(resized, dtype=np.float32) / 255.0
     input_tensor = np.expand_dims(np.expand_dims(arr, axis=-1), axis=0)
     return arr, input_tensor
+
+
+def enhance_without_blur(original_gray_pil: Image.Image, pred_2d: np.ndarray, blend_weight: float = 0.35) -> Image.Image:
+    """
+    دمج مخرجات CDAE مع الصورة الأصلية بدقتها الكاملة وشحذ التفاصيل لتجنب الضبابية.
+    """
+    orig_w, orig_h = original_gray_pil.size
+    orig_arr = np.asarray(original_gray_pil, dtype=np.float32) / 255.0
+
+    pred_clipped = np.clip(pred_2d, 0.0, 1.0)
+    pred_pil = Image.fromarray((pred_clipped * 255).astype(np.uint8), mode="L").resize(
+        (orig_w, orig_h), Image.Resampling.BICUBIC
+    )
+    pred_arr = np.asarray(pred_pil, dtype=np.float32) / 255.0
+
+    # الحفاظ على وضوح الصورة الأصلية وإضافة تحسين النموذج بنسب متوازنة
+    w = float(np.clip(blend_weight, 0.0, 0.7))
+    combined = np.clip((1.0 - w) * orig_arr + w * pred_arr, 0.0, 1.0)
+
+    out_pil = Image.fromarray((combined * 255).astype(np.uint8), mode="L")
+    # شحذ الحواف الدقيقة لإبراز التفاصيل التشريحية
+    out_pil = out_pil.filter(ImageFilter.UnsharpMask(radius=1.2, percent=125, threshold=2))
+    out_pil = ImageEnhance.Contrast(out_pil).enhance(1.08)
+    return out_pil
 
 
 def estimate_image_quality(arr_2d: np.ndarray) -> dict:
@@ -178,7 +236,7 @@ def estimate_image_quality(arr_2d: np.ndarray) -> dict:
         note = "التباين محدود بين المناطق التشريحية المختلفة."
     else:
         issue = "جودة أولية مقبولة مع فحص تحسيني وقائي"
-        note = "الصورة متوازنة نسبياً، وسيقوم النموذج بتحسين وضوح التفاصيل وتقليل الضجيج."
+        note = "الصورة متوازنة نسبياً، وتم تطبيق تحسين متوازن يحافظ على حدة التفاصيل."
 
     quality_percent = int(max(15, min(98, round((sharpness_score * 900) + (std_val * 140)))))
     return {
@@ -190,14 +248,13 @@ def estimate_image_quality(arr_2d: np.ndarray) -> dict:
     }
 
 
-# الترويسة الرئيسية
 st.markdown(
     """
     <div class="hero-card">
         <div class="hero-badge">مشروع تخرج — هندسة تقنيات الأجهزة الطبية</div>
         <h1 class="hero-title">🦷 نظام فحص جودة صور الأشعة واستعادتها بالذكاء الاصطناعي</h1>
         <p class="hero-subtitle">
-            منصة بحثية لتحليل صور الأشعة السينية داخل الفموية (Intraoral X-ray)، وتشخيص المؤشرات الأولية للخلل أو ضعف الجودة، واستعادة الصورة باستخدام شبكة CDAE.
+            منصة بحثية لتحليل صور الأشعة السينية داخل الفموية (Intraoral X-ray)، والتحقق من نوع الصورة، وتشخيص المؤشرات الأولية للخلل أو ضعف الجودة مع الحفاظ على وضوح التفاصيل.
         </p>
     </div>
     """,
@@ -208,7 +265,6 @@ model_path = resolve_model_path()
 
 if model_path is None:
     st.error("تعذر العثور على ملف النموذج `best_cdae_model.h5` داخل المستودع.")
-    st.info("تأكد من وجود ملف `best_cdae_model.h5` بجانب `app.py` في المستودع ثم أعد تشغيل التطبيق.")
     st.stop()
 
 try:
@@ -217,14 +273,12 @@ except Exception as exc:
     st.error(f"حدث خطأ أثناء تحميل النموذج: {exc}")
     st.stop()
 
-# تحديد أبعاد الإدخال تلقائياً من النموذج إذا أمكن
 input_shape = model.input_shape
 if isinstance(input_shape, list):
     input_shape = input_shape[0]
 target_h = int(input_shape[1]) if len(input_shape) >= 3 and input_shape[1] else 128
 target_w = int(input_shape[2]) if len(input_shape) >= 3 and input_shape[2] else 128
 
-# بطاقة رفع الصورة
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">📤 رفع صورة الأشعة السينية للفحص والاستعادة</div>', unsafe_allow_html=True)
 uploaded_file = st.file_uploader(
@@ -232,22 +286,35 @@ uploaded_file = st.file_uploader(
     type=["png", "jpg", "jpeg"],
     label_visibility="collapsed",
 )
+
+blend_weight = st.slider(
+    "نسبة تأثير نموذج الاستعادة (أقل = أوضح وأحدّ، أعلى = معالجة أقوى)",
+    min_value=0.10,
+    max_value=0.65,
+    value=0.30,
+    step=0.05,
+)
 st.markdown("</div>", unsafe_allow_html=True)
 
 if uploaded_file is not None:
     original_pil = Image.open(uploaded_file)
+
+    is_xray, reject_msg = is_likely_xray_image(original_pil)
+    if not is_xray:
+        st.error(f"❌ {reject_msg}")
+        st.warning("يرجى رفع صورة أشعة سينية خاصة بالأسنان (رمادية/إشعاعية) فقط.")
+        st.stop()
+
+    orig_gray_pil = ImageOps.grayscale(original_pil)
     arr_2d, input_tensor = preprocess_image(original_pil, target_size=(target_w, target_h))
     metrics = estimate_image_quality(arr_2d)
 
-    with st.spinner("جاري تحليل جودة الصورة واستعادتها بواسطة النموذج..."):
+    with st.spinner("جاري فحص الصورة واستعادتها بدون فقدان الوضوح..."):
         pred = model.predict(input_tensor, verbose=0)
         if isinstance(pred, list):
             pred = pred[0]
-        restored_2d = np.squeeze(pred)
-        restored_2d = np.clip(restored_2d, 0.0, 1.0)
-        restored_pil = Image.fromarray((restored_2d * 255).astype(np.uint8), mode="L").resize(
-            original_pil.size, Image.Resampling.LANCZOS
-        )
+        pred_2d = np.squeeze(pred)
+        restored_pil = enhance_without_blur(orig_gray_pil, pred_2d, blend_weight=blend_weight)
 
     col1, col2 = st.columns(2, gap="large")
 
@@ -259,25 +326,21 @@ if uploaded_file is not None:
 
     with col2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">✨ الصورة المستعادة بنموذج CDAE</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">✨ الصورة بعد المعالجة والتحسين</div>', unsafe_allow_html=True)
         st.image(restored_pil, use_container_width=True)
-
-        from io import BytesIO
 
         buf = BytesIO()
         restored_pil.save(buf, format="PNG")
         st.download_button(
-            label="⬇️ تحميل الصورة المستعادة (PNG)",
+            label="⬇️ تحميل الصورة المحسّنة (PNG)",
             data=buf.getvalue(),
-            file_name="restored_dental_xray.png",
+            file_name="enhanced_dental_xray.png",
             mime="image/png",
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # تقرير الفحص والتشخيص الأولي
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">📋 تقرير الفحص والتشخيص الأولي</div>', unsafe_allow_html=True)
-
     st.markdown(
         f"""
         <span class="metric-pill">مؤشر الوضوح التقريبي: {metrics["quality_percent"]}%</span>
