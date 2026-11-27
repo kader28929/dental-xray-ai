@@ -1,201 +1,548 @@
-import os
-import io
+import base64
+from io import BytesIO
+from pathlib import Path
 import numpy as np
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 import streamlit as st
 import tensorflow as tf
 
 st.set_page_config(
-    page_title="Dental Intraoral X-Ray Restoration - Al-Bayan University",
+    page_title="نظام فحص جودة صور الأشعة واستعادتها",
     page_icon="🦷",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-MODEL_PATH = "best_cdae_model.h5"
-LOGO_CANDIDATES = ["logo.png.WEBP", "bayan_logo.png"]
-
-# تنسيق الواجهة باللون الأزرق الفاتح والهوية البصرية
 st.markdown(
     """
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
+
+        html, body, [class*="css"] {
+            font-family: 'Cairo', sans-serif;
+            direction: RTL;
+            text-align: right;
+        }
+
         .stApp {
-            background: linear-gradient(180deg, #e8f4fc 0%, #f5fafe 55%, #ffffff 100%);
+            background: linear-gradient(180deg, #dff0fb 0%, #edf7fe 55%, #f5faff 100%);
         }
-        [data-testid="stSidebar"] {
-            background-color: #dceefa;
-            border-right: 1px solid #b8dcf5;
+
+        .main .block-container {
+            max-width: 1080px;
+            padding-top: 2rem;
+            padding-bottom: 3rem;
         }
-        .main-header {
-            background-color: #d6ecfa;
-            border: 1px solid #a8d4f0;
+
+        .hero-card {
+            position: relative;
+            background: #ffffff;
+            border: 1px solid #cbe3f5;
+            border-right: 6px solid #0284c7;
+            border-radius: 18px;
+            padding: 24px 28px;
+            box-shadow: 0 8px 24px rgba(2, 132, 199, 0.08);
+            margin-bottom: 22px;
+        }
+
+        .hero-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .hero-content {
+            flex: 1;
+        }
+
+        .uni-logo-corner {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #f0f8ff;
+            border: 1px solid #bae0fb;
             border-radius: 14px;
-            padding: 18px 22px;
+            padding: 8px 12px;
+            min-width: 82px;
+            text-align: center;
+        }
+
+        .uni-logo-corner img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+            margin-bottom: 4px;
+        }
+
+        .uni-logo-text {
+            color: #0369a1;
+            font-size: 0.72rem;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+
+        .hero-badge {
+            display: inline-block;
+            background: #e0f2fe;
+            color: #0369a1;
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 5px 12px;
+            border-radius: 999px;
+            margin-bottom: 10px;
+        }
+
+        .hero-title {
+            color: #0f172a;
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin: 0 0 8px 0;
+            line-height: 1.4;
+        }
+
+        .hero-subtitle {
+            color: #475569;
+            font-size: 1rem;
+            margin: 0;
+            line-height: 1.7;
+        }
+
+        .section-card {
+            background: #ffffff;
+            border: 1px solid #d4e8f7;
+            border-radius: 16px;
+            padding: 20px 22px;
+            box-shadow: 0 4px 16px rgba(2, 132, 199, 0.05);
             margin-bottom: 18px;
         }
-        .main-header h1 {
-            color: #0b3c5d;
-            margin: 0 0 6px 0;
-            font-size: 1.75rem;
+
+        .section-title {
+            color: #0f172a;
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 12px;
         }
-        .main-header p {
-            color: #245678;
-            margin: 0;
-            font-size: 0.98rem;
+
+        .diag-box {
+            background: #f0f8ff;
+            border: 1px solid #bae0fb;
+            border-radius: 14px;
+            padding: 16px 18px;
+            margin-top: 12px;
         }
-        .stButton > button, .stDownloadButton > button {
-            background-color: #1d70b8;
-            color: #ffffff;
-            border: none;
-            border-radius: 8px;
+
+        .metric-pill {
+            display: inline-block;
+            background: #e0f2fe;
+            color: #0c4a6e;
+            border-radius: 10px;
+            padding: 6px 12px;
+            font-size: 0.9rem;
             font-weight: 600;
+            margin-left: 8px;
+            margin-bottom: 8px;
         }
-        .stButton > button:hover, .stDownloadButton > button:hover {
-            background-color: #14538a;
-            color: #ffffff;
+
+        [data-testid="stFileUploader"] section {
+            background-color: #f3f9fe !important;
+            border: 2px dashed #38bdf8 !important;
+            border-radius: 16px !important;
+            padding: 20px !important;
         }
+
+        .stButton > button, .stDownloadButton > button {
+            width: 100%;
+            border-radius: 12px;
+            font-weight: 700;
+            padding: 0.65rem 1.2rem;
+            font-family: 'Cairo', sans-serif;
+        }
+
+        footer {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+BASE_DIR = Path(__file__).resolve().parent
 
-def find_logo_path() -> str | None:
-    for candidate in LOGO_CANDIDATES:
-        if os.path.exists(candidate):
-            return candidate
+CANDIDATE_PATHS = [
+    BASE_DIR / "best_cdae_model.h5",
+    BASE_DIR / "models" / "best_cdae_model.h5",
+    BASE_DIR / "models" / "models" / "best_cdae_model.h5",
+]
+
+LOGO_CANDIDATES = [
+    BASE_DIR / "logo.png.WEBP",
+    BASE_DIR / "logo.png",
+    BASE_DIR / "al_bayan_logo.png",
+    BASE_DIR / "logo.jpg",
+    BASE_DIR / "logo.jpeg",
+    BASE_DIR / "logo.webp",
+]
+
+
+def get_logo_html() -> str:
+    for logo_path in LOGO_CANDIDATES:
+        if logo_path.exists():
+            ext = logo_path.suffix.lstrip(".").lower()
+            if ext == "jpg":
+                ext = "jpeg"
+            elif ext == "webp":
+                ext = "webp"
+            b64 = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
+            return (
+                f'<div class="uni-logo-corner">'
+                f'<img src="data:image/{ext};base64,{b64}" alt="Al-Bayan University Logo">'
+                f'<span class="uni-logo-text">جامعة البيان</span>'
+                f"</div>"
+            )
+    return (
+        '<div class="uni-logo-corner">'
+        '<span style="font-size:1.5rem; line-height:1.2;">🏛️</span>'
+        '<span class="uni-logo-text">جامعة البيان</span>'
+        "</div>"
+    )
+
+
+def resolve_model_path() -> Path | None:
+    for path in CANDIDATE_PATHS:
+        if path.exists():
+            return path
     return None
 
 
-@st.cache_resource(show_spinner="جاري تحميل نموذج الذكاء الاصطناعي...")
-def load_cdae_model(path: str):
-    if not os.path.exists(path):
-        return None
-    return tf.keras.models.load_model(path, compile=False)
+@st.cache_resource
+def load_cdae_model(model_path_str: str):
+    return tf.keras.models.load_model(model_path_str, compile=False)
 
 
-def enhance_radiograph_and_black_level(
-    pil_gray: Image.Image,
-    black_boost: float = 0.12,
-    apply_clarity: bool = True,
-) -> Image.Image:
+def is_likely_xray_image(pil_img: Image.Image) -> tuple[bool, str]:
+    rgb = pil_img.convert("RGB").resize((256, 256), Image.Resampling.BILINEAR)
+    arr = np.asarray(rgb, dtype=np.float32) / 255.0
+
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    max_c = np.maximum(np.maximum(r, g), b)
+    min_c = np.minimum(np.minimum(r, g), b)
+    delta = max_c - min_c
+
+    saturation = np.where(max_c > 0.05, delta / np.maximum(max_c, 1e-6), 0.0)
+    high_sat_ratio = float(np.mean(saturation > 0.22))
+    mean_sat = float(np.mean(saturation))
+
+    rg_diff = float(np.mean(np.abs(r - g)))
+    rb_diff = float(np.mean(np.abs(r - b)))
+    gb_diff = float(np.mean(np.abs(g - b)))
+    color_spread = max(rg_diff, rb_diff, gb_diff)
+
+    if high_sat_ratio > 0.14 or mean_sat > 0.12 or color_spread > 0.045:
+        return False, "هذه ليست صورة أشعة"
+
+    gray = np.asarray(ImageOps.grayscale(rgb), dtype=np.float32) / 255.0
+    if float(np.std(gray)) < 0.04:
+        return False, "هذه ليست صورة أشعة"
+
+    return True, ""
+
+
+def preprocess_image(pil_img: Image.Image, target_size: tuple[int, int] = (256, 256)):
+    gray = ImageOps.grayscale(pil_img)
+    resized = gray.resize(target_size, Image.Resampling.BICUBIC)
+    arr = np.asarray(resized, dtype=np.float32) / 255.0
+    input_tensor = np.expand_dims(np.expand_dims(arr, axis=-1), axis=0)
+    return arr, input_tensor
+
+
+def detect_and_reconstruct_missing_regions(
+    orig_arr: np.ndarray,
+    pred_arr: np.ndarray,
+    inpaint_strength: float = 0.65,
+) -> tuple[np.ndarray, float]:
+    """
+    اكتشاف المناطق التالفة أو المفقودة أو المنخفضة التباين/الحدود وإعادة بنائها
+    عبر دمج مخرجات CDAE وتنعيم البنية المحيطة (diffusion/inpainting) ثم رفع الدقة.
+    """
+    h, w = orig_arr.shape
+
+    local_mean_pil = Image.fromarray((orig_arr * 255).astype(np.uint8), mode="L").filter(
+        ImageFilter.BoxBlur(radius=9)
+    )
+    local_mean = np.asarray(local_mean_pil, dtype=np.float32) / 255.0
+    local_diff = np.abs(orig_arr - local_mean)
+
+    dark_hole = orig_arr < 0.06
+    bright_clip = orig_arr > 0.96
+    low_detail = local_diff < 0.012
+
+    defect_mask = np.clip(
+        (dark_hole.astype(np.float32) * 0.85)
+        + (bright_clip.astype(np.float32) * 0.75)
+        + (low_detail.astype(np.float32) * 0.35),
+        0.0,
+        1.0,
+    )
+
+    mask_pil = Image.fromarray((defect_mask * 255).astype(np.uint8), mode="L").filter(
+        ImageFilter.BoxBlur(radius=4)
+    )
+    smooth_mask = (np.asarray(mask_pil, dtype=np.float32) / 255.0) * float(np.clip(inpaint_strength, 0.0, 1.0))
+
+    diffused_pil = Image.fromarray((pred_arr * 255).astype(np.uint8), mode="L").filter(
+        ImageFilter.GaussianBlur(radius=2.0)
+    )
+    diffused_arr = np.asarray(diffused_pil, dtype=np.float32) / 255.0
+    reconstructed_patch = np.clip(0.65 * pred_arr + 0.35 * diffused_arr, 0.0, 1.0)
+
+    repaired_arr = np.clip((1.0 - smooth_mask) * orig_arr + smooth_mask * reconstructed_patch, 0.0, 1.0)
+    defect_ratio_percent = float(np.mean(smooth_mask > 0.25) * 100.0)
+    return repaired_arr, defect_ratio_percent
+
+
+def apply_black_boost(pil_gray: Image.Image, black_boost: float = 0.12) -> Image.Image:
+    """تعزيز اللون الأسود لتعميق السواد وتقليل الغشاوة الرمادية الباهتة."""
+    if black_boost <= 0.0:
+        return pil_gray
     arr = np.asarray(pil_gray, dtype=np.float32) / 255.0
-
-    if black_boost > 0.0:
-        low_thresh = np.clip(black_boost, 0.0, 0.45)
-        arr = np.clip((arr - low_thresh) / (1.0 - low_thresh), 0.0, 1.0)
-        arr = np.power(arr, 1.15)
-
-    out_img = Image.fromarray((arr * 255.0).astype(np.uint8), mode="L")
-
-    if apply_clarity:
-        out_img = ImageOps.autocontrast(out_img, cutoff=1)
-        out_img = out_img.filter(
-            ImageFilter.UnsharpMask(radius=1.2, percent=90, threshold=2)
-        )
-
-    return out_img
+    low_thresh = float(np.clip(black_boost, 0.0, 0.45))
+    arr = np.clip((arr - low_thresh) / (1.0 - low_thresh), 0.0, 1.0)
+    arr = np.power(arr, 1.15)
+    return Image.fromarray((arr * 255.0).astype(np.uint8), mode="L")
 
 
-def restore_dental_xray(
-    uploaded_pil: Image.Image,
-    model,
-    scale_factor: int = 1,
+def restore_and_upscale_image(
+    original_gray_pil: Image.Image,
+    pred_2d: np.ndarray,
+    blend_weight: float = 0.35,
+    inpaint_strength: float = 0.65,
+    upscale_factor: int = 2,
     black_boost: float = 0.12,
-    apply_clarity: bool = True,
-) -> Image.Image:
-    orig_w, orig_h = uploaded_pil.size
-    gray_256 = ImageOps.grayscale(uploaded_pil).resize(
-        (256, 256), Image.Resampling.BICUBIC
+) -> tuple[Image.Image, float]:
+    orig_w, orig_h = original_gray_pil.size
+    orig_arr = np.asarray(original_gray_pil, dtype=np.float32) / 255.0
+
+    pred_clipped = np.clip(pred_2d, 0.0, 1.0)
+    pred_pil = Image.fromarray((pred_clipped * 255).astype(np.uint8), mode="L").resize(
+        (orig_w, orig_h), Image.Resampling.BICUBIC
     )
-    inp_arr = np.asarray(gray_256, dtype=np.float32) / 255.0
-    inp_tensor = inp_arr[np.newaxis, ..., np.newaxis]
+    pred_arr = np.asarray(pred_pil, dtype=np.float32) / 255.0
 
-    pred_arr = model.predict(inp_tensor, verbose=0)[0, ..., 0]
-    pred_uint8 = np.clip(pred_arr * 255.0, 0, 255).astype(np.uint8)
-    restored_256 = Image.fromarray(pred_uint8, mode="L")
-
-    enhanced_256 = enhance_radiograph_and_black_level(
-        restored_256,
-        black_boost=black_boost,
-        apply_clarity=apply_clarity,
+    repaired_arr, defect_percent = detect_and_reconstruct_missing_regions(
+        orig_arr=orig_arr,
+        pred_arr=pred_arr,
+        inpaint_strength=inpaint_strength,
     )
 
-    target_w = max(256, orig_w) * int(scale_factor)
-    target_h = max(256, orig_h) * int(scale_factor)
-    return enhanced_256.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    w = float(np.clip(blend_weight, 0.0, 0.7))
+    combined = np.clip((1.0 - w) * repaired_arr + w * pred_arr, 0.0, 1.0)
+
+    scale = int(max(1, min(3, upscale_factor)))
+    target_w = int(min(2048, orig_w * scale))
+    target_h = int(min(2048, orig_h * scale))
+
+    base_pil = Image.fromarray((combined * 255).astype(np.uint8), mode="L")
+    if (target_w, target_h) != (orig_w, orig_h):
+        upscaled_pil = base_pil.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    else:
+        upscaled_pil = base_pil
+
+    sharpened_pil = upscaled_pil.filter(ImageFilter.UnsharpMask(radius=1.35, percent=135, threshold=2))
+    contrasted_pil = ImageEnhance.Contrast(sharpened_pil).enhance(1.08)
+    final_pil = apply_black_boost(contrasted_pil, black_boost=black_boost)
+    return final_pil, defect_percent
 
 
-logo_file = find_logo_path()
-
-with st.sidebar:
-    if logo_file is not None:
-        st.image(logo_file, use_container_width=True)
-    st.markdown("### 🦷 ترميم صور الأشعة السنية")
-    st.caption("مشروع تخرج - كلية طب الأسنان / جامعة البيان")
-    st.divider()
-
-    scale_factor = st.selectbox("معامل التكبير (Resolution)", options=[1, 2, 3], index=0)
-    apply_clarity = st.checkbox("تحسين التباين وإبراز التفاصيل", value=True)
-    black_boost = st.slider(
-        "تعزيز اللون الأسود (Black Level Boost)",
-        min_value=0.0,
-        max_value=0.35,
-        value=0.12,
-        step=0.02,
-        help="يزيد عمق اللون الأسود ويزيل الغشاوة الرمادية الخفيفة حول الصورة وبين الجذور.",
+def estimate_image_quality(arr_2d: np.ndarray) -> dict:
+    mean_val = float(np.mean(arr_2d))
+    std_val = float(np.std(arr_2d))
+    laplacian = np.abs(
+        arr_2d[1:-1, :-2] + arr_2d[1:-1, 2:] + arr_2d[:-2, 1:-1] + arr_2d[2:, 1:-1] - 4 * arr_2d[1:-1, 1:-1]
     )
+    sharpness_score = float(np.mean(laplacian))
+
+    if mean_val < 0.22:
+        issue = "نقص تعريض إشعاعي / صورة داكنة (Underexposure)"
+        note = "الصورة منخفضة السطوع وقد تخفي تفاصيل المينا أو الجذور."
+    elif mean_val > 0.78:
+        issue = "فرط تعريض إشعاعي / صورة ساطعة جداً (Overexposure)"
+        note = "زيادة السطوع قد تؤدي إلى فقدان التباين الدقيق في الأنسجة."
+    elif sharpness_score < 0.035:
+        issue = "تشوش أو اهتزاز حركة / ضعف حدة (Motion Blur / Defocus)"
+        note = "الحواف غير حادة؛ يُنصح بمراجعة ثبات الحساس أو زمن التعريض."
+    elif std_val < 0.12:
+        issue = "انخفاض التباين أو ضجيج إشعاعي (Low Contrast / Noise)"
+        note = "التباين محدود بين المناطق التشريحية المختلفة."
+    else:
+        issue = "جودة أولية مقبولة مع فحص تحسيني وقائي"
+        note = "الصورة متوازنة نسبياً، وتم تطبيق إعادة بناء وتحسين دقة متوازن."
+
+    quality_percent = int(max(15, min(98, round((sharpness_score * 900) + (std_val * 140)))))
+    return {
+        "issue": issue,
+        "note": note,
+        "quality_percent": quality_percent,
+        "brightness_percent": int(round(mean_val * 100)),
+        "contrast_percent": int(round(min(100.0, std_val * 220))),
+    }
+
+
+logo_block = get_logo_html()
 
 st.markdown(
-    """
-    <div class="main-header">
-        <h1>🦷 نظام استعادة وإعادة بناء صور الأشعة السنية (CDAE)</h1>
-        <p>ترميم الصور التالفة أو الناقصة، إزالة التشويش، وتعزيز التباين واللون الأسود بدقة 256×256</p>
+    f"""
+    <div class="hero-card">
+        <div class="hero-header-row">
+            <div class="hero-content">
+                <div class="hero-badge">مشروع تخرج — هندسة تقنيات الأجهزة الطبية</div>
+                <h1 class="hero-title">🦷 نظام فحص جودة صور الأشعة واستعادتها بالذكاء الاصطناعي</h1>
+                <p class="hero-subtitle">
+                    منصة بحثية لتحليل صور الأشعة السينية داخل الفموية (Intraoral X-ray)، والتحقق من نوع الصورة، وإعادة بناء النقص أو الأجزاء التالفة، ورفع الدقة مع الحفاظ على وضوح التفاصيل.
+                </p>
+            </div>
+            {logo_block}
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-model = load_cdae_model(MODEL_PATH)
-if model is None:
-    st.error(
-        f"لم يتم العثور على ملف النموذج `{MODEL_PATH}` في المستودع. تأكد من رفعه إلى الجذر الرئيسي على GitHub."
-    )
+model_path = resolve_model_path()
+
+if model_path is None:
+    st.error("تعذر العثور على ملف النموذج `best_cdae_model.h5` داخل المستودع.")
     st.stop()
 
+try:
+    model = load_cdae_model(str(model_path))
+except Exception as exc:
+    st.error(f"حدث خطأ أثناء تحميل النموذج: {exc}")
+    st.stop()
+
+input_shape = model.input_shape
+if isinstance(input_shape, list):
+    input_shape = input_shape[0]
+target_h = int(input_shape[1]) if len(input_shape) >= 3 and input_shape[1] else 256
+target_w = int(input_shape[2]) if len(input_shape) >= 3 and input_shape[2] else 256
+
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📤 رفع صورة الأشعة السينية وإعدادات الاستعادة والدقة</div>', unsafe_allow_html=True)
 uploaded_file = st.file_uploader(
-    "اختر صورة الأشعة (PNG, JPG, JPEG, WEBP)",
-    type=["png", "jpg", "jpeg", "webp"],
+    "اختر صورة أشعة سينية (PNG, JPG, JPEG)",
+    type=["png", "jpg", "jpeg"],
+    label_visibility="collapsed",
 )
 
-if uploaded_file is not None:
-    original_img = Image.open(uploaded_file)
+c_ctrl1, c_ctrl2, c_ctrl3, c_ctrl4 = st.columns(4)
+with c_ctrl1:
+    blend_weight = st.slider(
+        "نسبة تأثير نموذج CDAE",
+        min_value=0.10,
+        max_value=0.65,
+        value=0.30,
+        step=0.05,
+    )
+with c_ctrl2:
+    inpaint_strength = st.slider(
+        "قوة إعادة بناء النقص والتلف",
+        min_value=0.10,
+        max_value=1.00,
+        value=0.65,
+        step=0.05,
+    )
+with c_ctrl3:
+    upscale_factor = st.selectbox(
+        "معامل زيادة الدقة (Resolution)",
+        options=[1, 2, 3],
+        index=1,
+        format_func=lambda x: f"{x}x (الدقة الأصلية)" if x == 1 else f"{x}x (رفع الدقة)",
+    )
+with c_ctrl4:
+    black_boost = st.slider(
+        "تعزيز اللون الأسود",
+        min_value=0.0,
+        max_value=0.35,
+        value=0.12,
+        step=0.02,
+    )
 
-    with st.spinner("جاري إعادة بناء وترميم الصورة وتعزيز التباين..."):
-        restored_img = restore_dental_xray(
-            uploaded_pil=original_img,
-            model=model,
-            scale_factor=scale_factor,
+st.markdown("</div>", unsafe_allow_html=True)
+
+if uploaded_file is not None:
+    original_pil = Image.open(uploaded_file)
+
+    is_xray, reject_msg = is_likely_xray_image(original_pil)
+    if not is_xray:
+        st.error(f"❌ {reject_msg}")
+        st.warning("يرجى رفع صورة أشعة سينية خاصة بالأسنان (رمادية/إشعاعية) فقط.")
+        st.stop()
+
+    orig_gray_pil = ImageOps.grayscale(original_pil)
+    arr_2d, input_tensor = preprocess_image(original_pil, target_size=(target_w, target_h))
+    metrics = estimate_image_quality(arr_2d)
+
+    with st.spinner("جاري إعادة بناء النقص ورفع دقة الصورة..."):
+        pred = model.predict(input_tensor, verbose=0)
+        if isinstance(pred, list):
+            pred = pred[0]
+        pred_2d = np.squeeze(pred)
+        restored_pil, defect_percent = restore_and_upscale_image(
+            original_gray_pil=orig_gray_pil,
+            pred_2d=pred_2d,
+            blend_weight=blend_weight,
+            inpaint_strength=inpaint_strength,
+            upscale_factor=upscale_factor,
             black_boost=black_boost,
-            apply_clarity=apply_clarity,
         )
 
-    col1, col2 = st.columns(2)
+    orig_w, orig_h = orig_gray_pil.size
+    res_w, res_h = restored_pil.size
+
+    col1, col2 = st.columns(2, gap="large")
 
     with col1:
-        st.subheader("الصورة الأصلية")
-        st.image(original_img, use_container_width=True)
-        st.caption(f"الأبعاد الأصلية: {original_img.size[0]} × {original_img.size[1]} px")
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="section-title">🩻 الصورة الأصلية ({orig_w}×{orig_h} px)</div>',
+            unsafe_allow_html=True,
+        )
+        st.image(original_pil, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with col2:
-        st.subheader("الصورة المُرمَّمة والمعزّزة")
-        st.image(restored_img, use_container_width=True)
-        st.caption(f"الأبعاد الناتجة: {restored_img.size[0]} × {restored_img.size[1]} px")
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="section-title">✨ الصورة المستعادة وعالية الدقة ({res_w}×{res_h} px)</div>',
+            unsafe_allow_html=True,
+        )
+        st.image(restored_pil, use_container_width=True)
 
-        img_buffer = io.BytesIO()
-        restored_img.save(img_buffer, format="PNG")
+        buf = BytesIO()
+        restored_pil.save(buf, format="PNG")
         st.download_button(
-            label="⬇️ تحميل الصورة المُرمَّمة (PNG)",
-            data=img_buffer.getvalue(),
-            file_name="restored_dental_xray.png",
+            label="⬇️ تحميل الصورة المستعادة وعالية الدقة (PNG)",
+            data=buf.getvalue(),
+            file_name="reconstructed_highres_dental_xray.png",
             mime="image/png",
         )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📋 تقرير الفحص وإعادة البناء والدقة</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <span class="metric-pill">مؤشر الوضوح التقريبي: {metrics["quality_percent"]}%</span>
+        <span class="metric-pill">نسبة المناطق المرممة: {defect_percent:.1f}%</span>
+        <span class="metric-pill">السطوع: {metrics["brightness_percent"]}%</span>
+        <span class="metric-pill">التباين: {metrics["contrast_percent"]}%</span>
+        <div class="diag-box">
+            <strong>الحالة المرصودة:</strong> {metrics["issue"]}<br>
+            <span style="color:#475569;">{metrics["note"]}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("ملاحظة بحثية: هذا النظام مخصص للأغراض الأكاديمية والبحثية لمشروع التخرج ولا يُغني عن التقييم السريري المتخصص.")
+    st.markdown("</div>", unsafe_allow_html=True)
