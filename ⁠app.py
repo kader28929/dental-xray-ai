@@ -175,14 +175,15 @@ CANDIDATE_PATHS = [
     BASE_DIR / "best_cdae_model.h5",
     BASE_DIR / "models" / "best_cdae_model.h5",
     BASE_DIR / "models" / "models" / "best_cdae_model.h5",
-]
-
 LOGO_CANDIDATES = [
     BASE_DIR / "logo.png",
     BASE_DIR / "al_bayan_logo.png",
     BASE_DIR / "logo.jpg",
     BASE_DIR / "logo.jpeg",
+    BASE_DIR / "logo.png.WEBP",
+    BASE_DIR / "logo.webp",
 ]
+
 
 
 def get_logo_html() -> str:
